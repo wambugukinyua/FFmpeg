@@ -23,20 +23,20 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm nasm build-essential pkg-config
+          sudo apt-get install -y yasm nasm build-essential pkg-config cmake ninja-build
 
-      - name: Download FFmpeg 6.1 Source
+      - name: Download FFmpeg & MbedTLS Source
         run: |
           git clone --depth 1 --branch release/6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg_src
+          git clone --depth 1 --branch v3.5.2 https://github.com/Mbed-TLS/mbedtls.git mbedtls_src
 
-      - name: Compile FFmpeg for Android ABIs
+      - name: Compile MbedTLS and FFmpeg for Android ABIs
         run: |
-          cd ffmpeg_src
           NDK=$ANDROID_NDK_HOME
           TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
           API=21
 
-          mkdir -p ../dist_libs
+          mkdir -p dist_libs
 
           build_abi() {
             ABI=$1
@@ -45,9 +45,29 @@ jobs:
             CC_TARGET=$4
 
             echo "=========================================================="
-            echo " Building for $ABI ($ARCH) with API $API..."
+            echo " [1/2] Building MbedTLS for $ABI ($ARCH)..."
             echo "=========================================================="
+            MBEDTLS_PREFIX="$(pwd)/mbedtls_build/$ABI"
+            rm -rf mbedtls_src/build_$ABI
+            mkdir -p mbedtls_src/build_$ABI
+            cd mbedtls_src/build_$ABI
 
+            cmake .. -G Ninja \
+              -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=$ABI \
+              -DANDROID_PLATFORM=android-$API \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DENABLE_TESTING=OFF \
+              -DENABLE_PROGRAMS=OFF \
+              -DCMAKE_INSTALL_PREFIX="$MBEDTLS_PREFIX"
+
+            ninja install
+            cd ../..
+
+            echo "=========================================================="
+            echo " [2/2] Building FFmpeg for $ABI ($ARCH) with API $API..."
+            echo "=========================================================="
+            cd ffmpeg_src
             PREFIX="$(pwd)/build_out/$ABI"
 
             ./configure \
@@ -62,7 +82,8 @@ jobs:
               --nm="$TOOLCHAIN/bin/llvm-nm" \
               --ranlib="$TOOLCHAIN/bin/llvm-ranlib" \
               --strip="$TOOLCHAIN/bin/llvm-strip" \
-              --extra-cflags="-O3 -fPIC -DANDROID" \
+              --extra-cflags="-O3 -fPIC -DANDROID -I$MBEDTLS_PREFIX/include" \
+              --extra-ldflags="-L$MBEDTLS_PREFIX/lib" \
               --enable-shared \
               --disable-static \
               --disable-programs \
@@ -73,8 +94,10 @@ jobs:
               --disable-postproc \
               --disable-hwaccels \
               --disable-vulkan \
+              --disable-v4l2-m2m \
               --disable-everything \
-              --enable-protocol=file,pipe,http,tcp \
+              --enable-mbedtls \
+              --enable-protocol=file,pipe,http,https,tcp,tls,crypto \
               --enable-demuxer=aac,mp3,ogg,flac,wav,mov,matroska,hls \
               --enable-decoder=aac,mp3,opus,vorbis,flac,alac,ac3,eac3 \
               --enable-parser=aac,mpegaudio,opus,vorbis,flac \
@@ -95,6 +118,8 @@ jobs:
             cp "$PREFIX/lib/libavcodec.so" "../dist_libs/$ABI/"
             cp "$PREFIX/lib/libavutil.so" "../dist_libs/$ABI/"
             cp "$PREFIX/lib/libswresample.so" "../dist_libs/$ABI/"
+
+            cd ..
           }
 
           # 1. 32-bit ARM Phone (armeabi-v7a)
