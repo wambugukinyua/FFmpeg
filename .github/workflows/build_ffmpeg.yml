@@ -95,7 +95,6 @@ jobs:
               --disable-avdevice \
               --disable-swscale \
               --disable-avfilter \
-              --disable-postproc \
               --disable-hwaccels \
               --disable-vulkan \
               --disable-v4l2-m2m \
