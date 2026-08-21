@@ -71,9 +71,11 @@ jobs:
               --disable-swscale \
               --disable-avfilter \
               --disable-postproc \
+              --disable-hwaccels \
+              --disable-vulkan \
               --disable-everything \
-              --enable-protocol=file,http,https,tcp,tls \
-              --enable-demuxer=aac,mp3,ogg,flac,mov,matroska,hls,dash,wav \
+              --enable-protocol=file,pipe \
+              --enable-demuxer=aac,mp3,ogg,flac,wav \
               --enable-decoder=aac,mp3,opus,vorbis,flac,alac,ac3,eac3 \
               --enable-parser=aac,mpegaudio,opus,vorbis,flac \
               --enable-swresample \
@@ -100,9 +102,6 @@ jobs:
 
           # 2. 64-bit ARM (arm64-v8a)
           build_abi "arm64-v8a" "aarch64" "armv8-a" "aarch64-linux-android"
-
-          # 3. 64-bit x86 Emulator (x86_64)
-          build_abi "x86_64" "x86_64" "x86-64" "x86_64-linux-android"
 
       - name: Package Native Libraries
         run: |
