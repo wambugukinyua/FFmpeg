@@ -116,21 +116,21 @@ jobs:
             $TOOLCHAIN/bin/llvm-strip "$PREFIX/lib/"*.so
 
             # Copy .so files to dist
-            mkdir -p "../../dist_libs/$ABI"
-            cp "$PREFIX/lib/libavformat.so" "../../dist_libs/$ABI/"
-            cp "$PREFIX/lib/libavcodec.so" "../../dist_libs/$ABI/"
-            cp "$PREFIX/lib/libavutil.so" "../../dist_libs/$ABI/"
-            cp "$PREFIX/lib/libswresample.so" "../../dist_libs/$ABI/"
+            mkdir -p "../dist_libs/$ABI"
+            cp "$PREFIX/lib/libavformat.so" "../dist_libs/$ABI/"
+            cp "$PREFIX/lib/libavcodec.so" "../dist_libs/$ABI/"
+            cp "$PREFIX/lib/libavutil.so" "../dist_libs/$ABI/"
+            cp "$PREFIX/lib/libswresample.so" "../dist_libs/$ABI/"
 
             # Copy MbedTLS shared libs if present (needed for HTTPS/TLS)
-            cp "$MBEDTLS_PREFIX/lib/"libmbed*.so* "../../dist_libs/$ABI/" 2>/dev/null || true
+            cp "$MBEDTLS_PREFIX/lib/"libmbed*.so* "../dist_libs/$ABI/" 2>/dev/null || true
 
             # Ship matching FFmpeg headers (first ABI only, headers are arch-independent)
-            if [ ! -d "../../dist_libs/include" ]; then
-              cp -r "$PREFIX/include" "../../dist_libs/include"
+            if [ ! -d "../dist_libs/include" ]; then
+              cp -r "$PREFIX/include" "../dist_libs/include"
             fi
 
-            cd ../..
+            cd ..
           }
 
           # 1. 32-bit ARM Phone (armeabi-v7a)
