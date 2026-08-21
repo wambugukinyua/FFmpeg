@@ -1,0 +1,124 @@
+name: Build Audio-Only FFmpeg for Android
+
+on:
+  workflow_dispatch: # Allows manual one-click trigger from GitHub Actions tab
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-ffmpeg:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d # Highly stable LTS NDK version
+          link-to-sdk: true
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yasm nasm build-essential pkg-config
+
+      - name: Download FFmpeg 6.1 Source
+        run: |
+          git clone --depth 1 --branch release/6.1 https://github.com/FFmpeg/FFmpeg.git ffmpeg_src
+
+      - name: Compile FFmpeg for Android ABIs
+        run: |
+          cd ffmpeg_src
+          NDK=$ANDROID_NDK_HOME
+          TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+          API=21
+
+          mkdir -p ../dist_libs
+
+          build_abi() {
+            ABI=$1
+            ARCH=$2
+            CPU=$3
+            CC_TARGET=$4
+
+            echo "=========================================================="
+            echo " Building for $ABI ($ARCH) with API $API..."
+            echo "=========================================================="
+
+            PREFIX="$(pwd)/build_out/$ABI"
+
+            ./configure \
+              --prefix="$PREFIX" \
+              --target-os=android \
+              --arch=$ARCH \
+              --cpu=$CPU \
+              --enable-cross-compile \
+              --cc="$TOOLCHAIN/bin/${CC_TARGET}${API}-clang" \
+              --cxx="$TOOLCHAIN/bin/${CC_TARGET}${API}-clang++" \
+              --ar="$TOOLCHAIN/bin/llvm-ar" \
+              --nm="$TOOLCHAIN/bin/llvm-nm" \
+              --ranlib="$TOOLCHAIN/bin/llvm-ranlib" \
+              --strip="$TOOLCHAIN/bin/llvm-strip" \
+              --extra-cflags="-O3 -fPIC -DANDROID" \
+              --enable-shared \
+              --disable-static \
+              --disable-programs \
+              --disable-doc \
+              --disable-avdevice \
+              --disable-swscale \
+              --disable-avfilter \
+              --disable-postproc \
+              --disable-everything \
+              --enable-protocol=file,http,https,tcp,tls \
+              --enable-demuxer=aac,mp3,ogg,flac,mov,matroska,hls,dash,wav \
+              --enable-decoder=aac,mp3,opus,vorbis,flac,alac,ac3,eac3 \
+              --enable-parser=aac,mpegaudio,opus,vorbis,flac \
+              --enable-swresample \
+              --enable-small \
+              --enable-pic
+
+            make clean
+            make -j$(nproc)
+            make install
+
+            # Strip debug symbols to keep binary size tiny (< 2-3 MB)
+            $TOOLCHAIN/bin/llvm-strip "$PREFIX/lib/"*.so
+
+            # Copy to dist
+            mkdir -p "../dist_libs/$ABI"
+            cp "$PREFIX/lib/libavformat.so" "../dist_libs/$ABI/"
+            cp "$PREFIX/lib/libavcodec.so" "../dist_libs/$ABI/"
+            cp "$PREFIX/lib/libavutil.so" "../dist_libs/$ABI/"
+            cp "$PREFIX/lib/libswresample.so" "../dist_libs/$ABI/"
+          }
+
+          # 1. 32-bit ARM (armeabi-v7a)
+          build_abi "armeabi-v7a" "arm" "armv7-a" "armv7a-linux-androideabi"
+
+          # 2. 64-bit ARM (arm64-v8a)
+          build_abi "arm64-v8a" "aarch64" "armv8-a" "aarch64-linux-android"
+
+          # 3. 64-bit x86 Emulator (x86_64)
+          build_abi "x86_64" "x86_64" "x86-64" "x86_64-linux-android"
+
+      - name: Package Native Libraries
+        run: |
+          cd dist_libs
+          zip -r ../ffmpeg-android-audio-libs.zip .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-android-audio-libs
+          path: ffmpeg-android-audio-libs.zip
+
+      - name: Create GitHub Release (Optional if tag pushed or manual)
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: ffmpeg-android-audio-libs.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
