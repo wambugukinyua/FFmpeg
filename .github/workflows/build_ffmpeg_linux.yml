@@ -18,34 +18,65 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y yasm nasm build-essential pkg-config libssl-dev cmake ninja-build \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
 
-      - name: Clone FFmpeg Source
+      - name: Download FFmpeg & MbedTLS Source
         run: |
           git clone --depth 1 https://github.com/FFmpeg/FFmpeg.git ffmpeg_src
+          git clone --depth 1 --branch v3.6.3 https://github.com/Mbed-TLS/mbedtls.git mbedtls_src
 
-      - name: Build FFmpeg for Linux (x86_64 & arm64)
+      - name: Build FFmpeg for Linux (x86_64, arm64 & armhf)
         run: |
-          mkdir -p dist_linux/x86_64 dist_linux/arm64 dist_linux/include
+          mkdir -p dist_linux/x86_64 dist_linux/arm64 dist_linux/armhf dist_linux/include
 
           build_linux_arch() {
-            ARCH=$1           # x86_64, aarch64
-            DIST_NAME=$2      # x86_64, arm64
-            CROSS_PREFIX=$3   # "" or "aarch64-linux-gnu-"
+            ARCH=$1           # x86_64, aarch64, arm
+            CPU=$2            # x86-64, armv8-a, armv7-a
+            DIST_NAME=$3      # x86_64, arm64, armhf
+            CROSS_PREFIX=$4   # "", "aarch64-linux-gnu-", "arm-linux-gnueabihf-"
+            EXTRA_ARCH_FLAGS=$5
 
             echo "=========================================================="
-            echo " Building FFmpeg for Linux ($DIST_NAME)..."
+            echo " [1/2] Building MbedTLS for Linux ($DIST_NAME)..."
             echo "=========================================================="
+            MBEDTLS_PREFIX="$(pwd)/mbedtls_build/${DIST_NAME}"
+            rm -rf mbedtls_src/build_${DIST_NAME}
+            mkdir -p mbedtls_src/build_${DIST_NAME}
+            cd mbedtls_src/build_${DIST_NAME}
 
+            CMAKE_OPTS=""
+            if [ -n "$CROSS_PREFIX" ]; then
+              CMAKE_OPTS="-DCMAKE_C_COMPILER=${CROSS_PREFIX}gcc -DCMAKE_CXX_COMPILER=${CROSS_PREFIX}g++ -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$ARCH"
+            fi
+
+            cmake .. -G Ninja \
+              $CMAKE_OPTS \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -DUSE_SHARED_MBEDTLS_LIBRARY=ON \
+              -DUSE_STATIC_MBEDTLS_LIBRARY=ON \
+              -DENABLE_TESTING=OFF \
+              -DENABLE_PROGRAMS=OFF \
+              -DCMAKE_INSTALL_PREFIX="$MBEDTLS_PREFIX"
+
+            ninja install
+            cd ../..
+
+            echo "=========================================================="
+            echo " [2/2] Building FFmpeg for Linux ($DIST_NAME)..."
+            echo "=========================================================="
             BUILD_DIR="$(pwd)/build_linux_${DIST_NAME}"
             rm -rf "$BUILD_DIR"
             cp -a ffmpeg_src "$BUILD_DIR"
             cd "$BUILD_DIR"
             PREFIX="$(pwd)/install_out"
 
+            export PKG_CONFIG_PATH="$MBEDTLS_PREFIX/lib/pkgconfig:$MBEDTLS_PREFIX/lib:$PKG_CONFIG_PATH"
+
             EXTRA_OPTS=""
             if [ -n "$CROSS_PREFIX" ]; then
-              EXTRA_OPTS="--enable-cross-compile --cross-prefix=$CROSS_PREFIX --arch=$ARCH --target-os=linux"
+              EXTRA_OPTS="--enable-cross-compile --cross-prefix=$CROSS_PREFIX --arch=$ARCH --cpu=$CPU --target-os=linux --cc=${CROSS_PREFIX}gcc --cxx=${CROSS_PREFIX}g++ --ar=${CROSS_PREFIX}ar --ranlib=${CROSS_PREFIX}ranlib --strip=${CROSS_PREFIX}strip"
             fi
 
             ./configure \
@@ -62,14 +93,16 @@ jobs:
               --disable-vulkan \
               --disable-everything \
               --enable-version3 \
-              --enable-protocol=file,pipe,http,tcp,data,cache,subfile,concat,hls \
+              --enable-mbedtls \
+              --enable-protocol=file,pipe,http,https,tcp,tls,tls_mbedtls,crypto,data,cache,subfile,concat,hls \
               --enable-demuxer=aac,mp3,ogg,flac,wav,mov,matroska,hls,mpegts,concat \
               --enable-decoder=aac,aac_latm,mp3,mp3float,opus,vorbis,flac,alac,ac3,eac3 \
               --enable-parser=aac,mpegaudio,opus,vorbis,flac \
               --enable-swresample \
               --enable-small \
               --enable-pic \
-              --extra-cflags="-O3 -fPIC"
+              --extra-cflags="-O3 -fPIC $EXTRA_ARCH_FLAGS -I$MBEDTLS_PREFIX/include" \
+              --extra-ldflags="-L$MBEDTLS_PREFIX/lib"
 
             make -j$(nproc)
             make install
@@ -77,13 +110,16 @@ jobs:
             # Strip debug symbols
             if [ -n "$CROSS_PREFIX" ]; then
               ${CROSS_PREFIX}strip -s "$PREFIX/lib/"*.so || true
+              ${CROSS_PREFIX}strip -s "$MBEDTLS_PREFIX/lib/"*.so || true
             else
               strip -s "$PREFIX/lib/"*.so || true
+              strip -s "$MBEDTLS_PREFIX/lib/"*.so || true
             fi
 
             # Copy .so and .a files to dist
             mkdir -p "../dist_linux/${DIST_NAME}"
             cp -d "$PREFIX/lib/"libav*.so* "$PREFIX/lib/"libswresample.so* "../dist_linux/${DIST_NAME}/" 2>/dev/null || true
+            cp "$MBEDTLS_PREFIX/lib/"libmbed*.so* "../dist_linux/${DIST_NAME}/" 2>/dev/null || true
             cp "$PREFIX/lib/"*.a "../dist_linux/${DIST_NAME}/" 2>/dev/null || true
 
             if [ ! -d "../dist_linux/include" ] || [ ! -f "../dist_linux/include/libavformat/avformat.h" ]; then
@@ -94,10 +130,13 @@ jobs:
           }
 
           # 1. Linux x86_64 (Standard PC/Server)
-          build_linux_arch "x86_64" "x86_64" ""
+          build_linux_arch "x86_64" "x86-64" "x86_64" "" ""
 
           # 2. Linux ARM64 (Raspberry Pi 4/5, AArch64)
-          build_linux_arch "aarch64" "arm64" "aarch64-linux-gnu-"
+          build_linux_arch "aarch64" "armv8-a" "arm64" "aarch64-linux-gnu-" ""
+
+          # 3. Linux ARMhf 32-bit (Raspberry Pi 2/3, armv7l)
+          build_linux_arch "arm" "armv7-a" "armhf" "arm-linux-gnueabihf-" "-march=armv7-a -mfpu=neon -mfloat-abi=hard"
 
       - name: Package Linux Libraries
         run: |
