@@ -62,8 +62,7 @@ jobs:
               --disable-vulkan \
               --disable-everything \
               --enable-version3 \
-              --enable-openssl \
-              --enable-protocol=file,pipe,http,https,tcp,tls,crypto,data,cache,subfile,concat,hls \
+              --enable-protocol=file,pipe,http,tcp,data,cache,subfile,concat,hls \
               --enable-demuxer=aac,mp3,ogg,flac,wav,mov,matroska,hls,mpegts,concat \
               --enable-decoder=aac,aac_latm,mp3,mp3float,opus,vorbis,flac,alac,ac3,eac3 \
               --enable-parser=aac,mpegaudio,opus,vorbis,flac \
