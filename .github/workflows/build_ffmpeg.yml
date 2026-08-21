@@ -96,6 +96,7 @@ jobs:
               --disable-vulkan \
               --disable-v4l2-m2m \
               --disable-everything \
+              --enable-version3 \
               --enable-mbedtls \
               --enable-protocol=file,pipe,http,https,tcp,tls,crypto \
               --enable-demuxer=aac,mp3,ogg,flac,wav,mov,matroska,hls \
